@@ -1,4 +1,3 @@
-```python
 import streamlit as st
 import pandas as pd
 import joblib
@@ -222,14 +221,13 @@ with tab4:
     st.markdown("---")
 
     st.write("""
-    🔴 High Risk → Immediate fraud alert  
-    🟠 Medium Risk → Monitor  
-    🟢 Low Risk → Safe  
+🔴 High Risk → Immediate fraud alert  
+🟠 Medium Risk → Monitor  
+🟢 Low Risk → Safe  
 
-    Model considers:
-    - Transaction amount vs balance
-    - Location change
-    - Device risk
-    - Frequency of transactions
-    """)
-```
+Model considers:
+- Transaction amount vs balance
+- Location change
+- Device risk
+- Frequency of transactions
+""")
