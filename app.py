@@ -5,7 +5,7 @@ import numpy as np
 import time
 import sqlite3
 
-# ---------------- DATABASE SAFE FUNCTIONS ----------------
+# ---------------- DATABASE ----------------
 def create_tables():
     conn = sqlite3.connect('app.db', check_same_thread=False)
     c = conn.cursor()
@@ -58,14 +58,14 @@ if "logged_in" not in st.session_state:
 if "user" not in st.session_state:
     st.session_state.user = ""
 
-# ---------------- LOGIN SCREEN ----------------
+# ---------------- LOGIN ----------------
 if not st.session_state.logged_in:
 
     st.markdown("<h1 style='text-align:center;'>🔐 Login</h1>", unsafe_allow_html=True)
 
-    tab1_login, tab2_signup = st.tabs(["Login", "Sign Up"])
+    tabL, tabS = st.tabs(["Login", "Sign Up"])
 
-    with tab1_login:
+    with tabL:
         u = st.text_input("Username")
         p = st.text_input("Password", type="password")
         if st.button("Login"):
@@ -77,7 +77,7 @@ if not st.session_state.logged_in:
             else:
                 st.error("Invalid credentials")
 
-    with tab2_signup:
+    with tabS:
         nu = st.text_input("Create Username")
         npw = st.text_input("Create Password", type="password")
         if st.button("Create Account"):
@@ -86,12 +86,10 @@ if not st.session_state.logged_in:
 
     st.stop()
 
-# ---------------- ORIGINAL APP STARTS ----------------
-
-# Page config
+# ---------------- APP START ----------------
 st.set_page_config(page_title="Fraud Detection", layout="wide")
 
-# CSS Theme
+# CSS
 st.markdown("""
 <style>
 body {background-color: #e6f2ff;}
@@ -117,11 +115,19 @@ h1 {text-align:center; color:#003366; font-size:50px;}
 model = joblib.load("fraud_model.pkl")
 columns = joblib.load("columns.pkl")
 
-# Title
-st.markdown("<h1>🏦 AI Credit Card Fraud Detection System</h1>", unsafe_allow_html=True)
+# Title + Logout
+colL, colR = st.columns([8,1])
+with colL:
+    st.markdown("<h1>🏦 AI Credit Card Fraud Detection System</h1>", unsafe_allow_html=True)
+with colR:
+    if st.button("🔓 Logout"):
+        st.session_state.logged_in = False
+        st.session_state.user = ""
+        st.rerun()
+
 st.markdown("---")
 
-# Tabs (UNCHANGED + added History)
+# Tabs
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "🧾 Enter Transaction",
     "⚡ Demo Cases",
@@ -130,7 +136,7 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "📜 History"
 ])
 
-# ---------- COMMON PREDICT ----------
+# -------- Predict Function --------
 def predict(data):
     df = pd.DataFrame([data])
     df["amount_ratio"] = df["amount"]/(df["old_balance"]+1)
@@ -143,7 +149,7 @@ def predict(data):
     df = pd.get_dummies(df)
     for col in columns:
         if col not in df.columns:
-            df[col] = 0
+            df[col]=0
     df = df[columns]
 
     pred = model.predict(df)[0]
@@ -153,22 +159,12 @@ def predict(data):
 # ================= TAB 1 =================
 with tab1:
 
-    st.markdown("### 💼 Transaction Details")
-
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-        amount = st.number_input("Amount", 0.0)
-        old_balance = st.number_input("Old Balance", 0.0)
-        new_balance = st.number_input("New Balance", 0.0)
-
-    with col2:
-        method = st.selectbox("Method", ["UPI","NFC","ATM","NetBanking"])
-        t24 = st.slider("Transactions (24 hrs)", 1, 30)
-        hour = st.slider("Hour", 0, 23)
-
-    with col3:
-        day = st.slider("Day", 1, 31)
+    amount = st.number_input("Amount")
+    old = st.number_input("Old Balance")
+    new = st.number_input("New Balance")
+    method = st.selectbox("Method",["UPI","NFC","ATM","NetBanking"])
+    t24 = st.slider("Transactions 24hr",1,30)
+    hour = st.slider("Hour",0,23)
 
     lat1 = st.number_input("From Lat", value=13.08)
     lon1 = st.number_input("From Lon", value=80.27)
@@ -178,11 +174,11 @@ with tab1:
     if st.button("Analyze"):
 
         data = {
-            "amount":amount,"old_balance":old_balance,"new_balance":new_balance,
+            "amount":amount,"old_balance":old,"new_balance":new,
             "latitude_from":lat1,"longitude_from":lon1,
             "latitude_to":lat2,"longitude_to":lon2,
             "transactions_last_24hrs":t24,
-            "transaction_hour":hour,"transaction_day":day,
+            "transaction_hour":hour,"transaction_day":10,
             "is_weekend":0,"is_new_device":1,"failed_login_attempts":2
         }
 
@@ -190,7 +186,6 @@ with tab1:
         res = "FRAUD" if pred==1 else "LEGIT"
 
         st.success(f"{res} ({prob*100:.2f}%)")
-
         add_history(st.session_state.user, amount, method, res, prob)
 
 # ================= TAB 2 =================
@@ -198,12 +193,12 @@ with tab2:
 
     st.markdown("### ⚡ Click Demo Case")
 
-    demo_cases = [
+    cases = [
         ("Fraud",90000,95000,5000,"UPI",22,2,13.08,80.27,28.61,77.20),
         ("Legit",2000,50000,48000,"ATM",2,14,13.08,80.27,13.10,80.30)
     ]
 
-    for i,c in enumerate(demo_cases):
+    for i,c in enumerate(cases):
 
         if st.button(f"Case {i+1} ({c[0]})"):
 
@@ -232,7 +227,10 @@ with tab2:
 # ================= TAB 3 =================
 with tab3:
 
-    st.markdown("### 🗺️ Distance (KM)")
+    lat1 = st.number_input("Lat1", value=13.08)
+    lon1 = st.number_input("Lon1", value=80.27)
+    lat2 = st.number_input("Lat2", value=28.61)
+    lon2 = st.number_input("Lon2", value=77.20)
 
     R = 6371
     dlat = np.radians(lat2-lat1)
@@ -240,13 +238,42 @@ with tab3:
 
     a = np.sin(dlat/2)**2 + np.cos(np.radians(lat1))*np.cos(np.radians(lat2))*np.sin(dlon/2)**2
     c_val = 2*np.arctan2(np.sqrt(a),np.sqrt(1-a))
+
     dist = R*c_val
 
     st.metric("Distance KM", f"{dist:.2f}")
 
 # ================= TAB 4 =================
 with tab4:
-    st.write("AI insights based on model features")
+
+    st.markdown("### 🧠 AI Insights Dashboard")
+
+    try:
+        importance = model.feature_importances_
+
+        imp_df = pd.DataFrame({
+            "Feature": columns,
+            "Importance": importance
+        }).sort_values(by="Importance", ascending=False).head(10)
+
+        st.subheader("📊 Top Important Features")
+        st.bar_chart(imp_df.set_index("Feature"))
+
+    except:
+        st.warning("Feature importance not available")
+
+    st.markdown("---")
+
+    st.subheader("🔍 Fraud Detection Logic")
+
+    st.write("""
+🔴 Large transaction compared to balance  
+🔴 High transaction frequency  
+🔴 Late-night transactions  
+🔴 New device usage  
+🔴 Failed login attempts  
+🔴 Large geographic movement  
+""")
 
 # ================= TAB 5 =================
 with tab5:
