@@ -3,229 +3,205 @@ import pandas as pd
 import joblib
 import numpy as np
 import time
+import sqlite3
 
-# Page config
-st.set_page_config(page_title="Fraud Detection", layout="wide")
+# ---------------- DATABASE ----------------
+conn = sqlite3.connect('app.db', check_same_thread=False)
+c = conn.cursor()
 
-# CSS Theme
-st.markdown("""
-<style>
-body {background-color: #e6f2ff;}
-h1 {text-align:center; color:#003366; font-size:50px;}
-.card {
-    background-color:white;
-    padding:15px;
-    border-radius:15px;
-    box-shadow:2px 2px 10px rgba(0,0,0,0.1);
-    margin-bottom:10px;
-}
-.result-box {
-    padding:20px;
-    border-radius:15px;
-    text-align:center;
-    font-size:25px;
-    font-weight:bold;
-}
-</style>
-""", unsafe_allow_html=True)
+c.execute('''CREATE TABLE IF NOT EXISTS users (username TEXT, password TEXT)''')
+c.execute('''CREATE TABLE IF NOT EXISTS history (
+    username TEXT,
+    amount REAL,
+    method TEXT,
+    result TEXT,
+    probability REAL
+)''')
+conn.commit()
 
-# Load model
+def add_user(u,p):
+    c.execute("INSERT INTO users VALUES (?,?)",(u,p))
+    conn.commit()
+
+def login_user(u,p):
+    c.execute("SELECT * FROM users WHERE username=? AND password=?",(u,p))
+    return c.fetchone()
+
+def add_history(user, amt, method, res, prob):
+    c.execute("INSERT INTO history VALUES (?,?,?,?,?)",(user,amt,method,res,prob))
+    conn.commit()
+
+def get_history(user):
+    c.execute("SELECT * FROM history WHERE username=?",(user,))
+    return c.fetchall()
+
+# ---------------- SESSION ----------------
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+if "user" not in st.session_state:
+    st.session_state.user = ""
+
+# ---------------- LOGIN PAGE ----------------
+if not st.session_state.logged_in:
+
+    st.markdown("<h1 style='text-align:center;'>🔐 Secure Login</h1>", unsafe_allow_html=True)
+
+    tabL, tabS = st.tabs(["Login","Sign Up"])
+
+    with tabL:
+        u = st.text_input("Username")
+        p = st.text_input("Password", type="password")
+        if st.button("Login"):
+            if login_user(u,p):
+                st.session_state.logged_in = True
+                st.session_state.user = u
+                st.success("Welcome "+u)
+                st.rerun()
+            else:
+                st.error("Invalid credentials")
+
+    with tabS:
+        nu = st.text_input("New Username")
+        npw = st.text_input("New Password", type="password")
+        if st.button("Create Account"):
+            add_user(nu,npw)
+            st.success("Account created!")
+
+    st.stop()
+
+# ---------------- LOAD MODEL ----------------
 model = joblib.load("fraud_model.pkl")
 columns = joblib.load("columns.pkl")
 
-# Title
-st.markdown("<h1>🏦 AI Credit Card Fraud Detection System</h1>", unsafe_allow_html=True)
-st.markdown("---")
+st.markdown("<h1>🏦 Fraud Detection System</h1>", unsafe_allow_html=True)
 
-# Tabs
-tab1, tab2, tab3, tab4 = st.tabs([
-    "🧾 Enter Transaction",
-    "⚡ Demo Cases",
-    "🗺️ Transaction Visualizer",
-    "🧠 AI Insights"
+# ---------------- TABS ----------------
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    "Enter Transaction","Demo Cases","Distance","AI Insights","History"
 ])
 
-# ================= TAB 1 =================
+# ---------------- COMMON FUNCTION ----------------
+def predict(data):
+    df = pd.DataFrame([data])
+    df["amount_ratio"] = df["amount"]/(df["old_balance"]+1)
+    df["balance_diff"] = df["old_balance"] - df["new_balance"]
+    df["distance"] = np.sqrt(
+        (df["latitude_to"]-df["latitude_from"])**2 +
+        (df["longitude_to"]-df["longitude_from"])**2
+    )
+
+    df = pd.get_dummies(df)
+    for col in columns:
+        if col not in df.columns:
+            df[col]=0
+    df = df[columns]
+
+    pred = model.predict(df)[0]
+    prob = model.predict_proba(df)[0][1]
+
+    return pred, prob
+
+# ---------------- TAB 1 ----------------
 with tab1:
-    st.markdown("### 💼 Transaction Details")
 
-    col1, col2, col3 = st.columns(3)
+    amount = st.number_input("Amount")
+    old = st.number_input("Old Balance")
+    new = st.number_input("New Balance")
+    method = st.selectbox("Method",["UPI","NFC","ATM","NetBanking"])
+    t24 = st.slider("Transactions 24hr",1,30)
+    hour = st.slider("Hour",0,23)
 
-    with col1:
-        amount = st.number_input("Amount", 0.0)
-        old_balance = st.number_input("Old Balance", 0.0)
-        new_balance = st.number_input("New Balance", 0.0)
+    lat1 = st.number_input("From Lat", value=13.08)
+    lon1 = st.number_input("From Lon", value=80.27)
+    lat2 = st.number_input("To Lat", value=28.61)
+    lon2 = st.number_input("To Lon", value=77.20)
 
-    with col2:
-        method = st.selectbox("Method", ["UPI","NFC","ATM","NetBanking","Debit Card","Credit Card"])
-        transactions_24 = st.slider("Transactions (24 hrs)", 1, 30)
-        hour = st.slider("Hour", 0, 23)
+    if st.button("Analyze"):
 
-    with col3:
-        day = st.slider("Day", 1, 31)
-        is_weekend = st.selectbox("Weekend", ["No","Yes"])
-        is_new_device = st.selectbox("New Device", ["No","Yes"])
-        failed_attempts = st.slider("Failed Attempts", 0, 5)
+        data = {
+            "amount":amount,"old_balance":old,"new_balance":new,
+            "latitude_from":lat1,"longitude_from":lon1,
+            "latitude_to":lat2,"longitude_to":lon2,
+            "transactions_last_24hrs":t24,
+            "transaction_hour":hour,"transaction_day":10,
+            "is_weekend":0,"is_new_device":1,"failed_login_attempts":2
+        }
 
-    st.markdown("### 🌍 Location Details")
+        pred, prob = predict(data)
 
-    col4, col5 = st.columns(2)
-    with col4:
-        lat_from = st.number_input("From Latitude", value=13.08)
-        lon_from = st.number_input("From Longitude", value=80.27)
-    with col5:
-        lat_to = st.number_input("To Latitude", value=28.61)
-        lon_to = st.number_input("To Longitude", value=77.20)
+        res = "FRAUD" if pred==1 else "LEGIT"
 
-    is_weekend = 1 if is_weekend=="Yes" else 0
-    is_new_device = 1 if is_new_device=="Yes" else 0
+        st.success(f"{res} ({prob*100:.2f}%)")
 
-    if st.button("🚀 Analyze Transaction"):
+        add_history(st.session_state.user, amount, method, res, prob)
 
-        input_data = pd.DataFrame([{
-            "amount": amount,
-            "old_balance": old_balance,
-            "new_balance": new_balance,
-            "latitude_from": lat_from,
-            "longitude_from": lon_from,
-            "latitude_to": lat_to,
-            "longitude_to": lon_to,
-            "transactions_last_24hrs": transactions_24,
-            "transaction_hour": hour,
-            "transaction_day": day,
-            "is_weekend": is_weekend,
-            "is_new_device": is_new_device,
-            "failed_login_attempts": failed_attempts
-        }])
-
-        input_data["amount_ratio"] = input_data["amount"]/(input_data["old_balance"]+1)
-        input_data["balance_diff"] = input_data["old_balance"] - input_data["new_balance"]
-        input_data["distance"] = np.sqrt(
-            (input_data["latitude_to"]-input_data["latitude_from"])**2 +
-            (input_data["longitude_to"]-input_data["longitude_from"])**2
-        )
-
-        input_data = pd.get_dummies(input_data)
-
-        for col in columns:
-            if col not in input_data.columns:
-                input_data[col]=0
-
-        input_data = input_data[columns]
-
-        prediction = model.predict(input_data)[0]
-        prob = model.predict_proba(input_data)[0][1]
-
-        st.markdown("---")
-
-        if prediction == 1:
-            st.markdown(f"<div class='result-box' style='background:#ff4d4d;'>🚨 FRAUD DETECTED<br>{prob*100:.2f}% Risk</div>", unsafe_allow_html=True)
-        else:
-            st.markdown(f"<div class='result-box' style='background:#66cc66;'>✅ LEGIT TRANSACTION<br>{prob*100:.2f}% Risk</div>", unsafe_allow_html=True)
-
-        st.progress(float(prob))
-
-        st.map(pd.DataFrame({'lat':[lat_from,lat_to],'lon':[lon_from,lon_to]}))
-
-# ================= TAB 2 =================
+# ---------------- TAB 2 ----------------
 with tab2:
 
-    st.markdown("### ⚡ Click Demo Case")
-
-    demo_cases = [
-        ("High Fraud",90000,95000,5000,"Credit Card",25,2,0,1,4,13.08,80.27,28.61,77.20),
-        ("Medium Fraud",50000,70000,20000,"UPI",15,3,0,1,3,19.07,72.87,22.57,88.36),
-        ("Legit",2000,50000,48000,"ATM",2,14,0,0,0,13.08,80.27,13.10,80.30)
+    cases = [
+        ("Fraud",90000,95000,5000,"UPI",22,2,13.08,80.27,28.61,77.20),
+        ("Legit",2000,50000,48000,"ATM",2,14,13.08,80.27,13.10,80.30)
     ]
 
-    for i,case in enumerate(demo_cases):
+    for i,c in enumerate(cases):
 
-        if st.button(f"{case[0]} Case {i+1}"):
+        if st.button(f"Case {i+1} ({c[0]})"):
 
-            with st.spinner("Analyzing..."):
+            with st.spinner("Processing..."):
                 time.sleep(1)
 
-            input_data = pd.DataFrame([{
-                "amount": case[1],
-                "old_balance": case[2],
-                "new_balance": case[3],
-                "latitude_from": case[10],
-                "longitude_from": case[11],
-                "latitude_to": case[12],
-                "longitude_to": case[13],
-                "transactions_last_24hrs": case[5],
-                "transaction_hour": case[6],
-                "transaction_day": 15,
-                "is_weekend": case[7],
-                "is_new_device": case[8],
-                "failed_login_attempts": case[9]
-            }])
+            data = {
+                "amount":c[1],"old_balance":c[2],"new_balance":c[3],
+                "latitude_from":c[7],"longitude_from":c[8],
+                "latitude_to":c[9],"longitude_to":c[10],
+                "transactions_last_24hrs":c[5],
+                "transaction_hour":c[6],"transaction_day":10,
+                "is_weekend":0,"is_new_device":1,"failed_login_attempts":3
+            }
 
-            input_data["amount_ratio"] = input_data["amount"]/(input_data["old_balance"]+1)
-            input_data["balance_diff"] = input_data["old_balance"] - input_data["new_balance"]
-            input_data["distance"] = np.sqrt(
-                (input_data["latitude_to"]-input_data["latitude_from"])**2 +
-                (input_data["longitude_to"]-input_data["longitude_from"])**2
-            )
+            pred, prob = predict(data)
 
-            input_data = pd.get_dummies(input_data)
+            res = "FRAUD" if pred==1 else "LEGIT"
 
-            for col in columns:
-                if col not in input_data.columns:
-                    input_data[col]=0
+            st.error(res) if pred==1 else st.success(res)
 
-            input_data = input_data[columns]
+            st.write("### Details")
+            st.write(data)
 
-            prediction = model.predict(input_data)[0]
-            prob = model.predict_proba(input_data)[0][1]
+            add_history(st.session_state.user, c[1], c[4], res, prob)
 
-            if prediction == 1:
-                st.markdown(f"<div class='result-box' style='background:#ff4d4d;'>🚨 FRAUD<br>{prob*100:.2f}%</div>", unsafe_allow_html=True)
-            else:
-                st.markdown(f"<div class='result-box' style='background:#66cc66;'>✅ LEGIT<br>{prob*100:.2f}%</div>", unsafe_allow_html=True)
-
-# ================= TAB 3 =================
+# ---------------- TAB 3 ----------------
 with tab3:
 
-    st.markdown("### 🗺️ Distance (KM)")
+    lat1 = st.number_input("Lat1", value=13.08)
+    lon1 = st.number_input("Lon1", value=80.27)
+    lat2 = st.number_input("Lat2", value=28.61)
+    lon2 = st.number_input("Lon2", value=77.20)
 
-    lat1 = st.number_input("Lat From", value=13.08)
-    lon1 = st.number_input("Lon From", value=80.27)
-    lat2 = st.number_input("Lat To", value=28.61)
-    lon2 = st.number_input("Lon To", value=77.20)
-
-    # Haversine formula
-    R = 6371
-    dlat = np.radians(lat2-lat1)
-    dlon = np.radians(lon2-lon1)
+    R=6371
+    dlat=np.radians(lat2-lat1)
+    dlon=np.radians(lon2-lon1)
 
     a = np.sin(dlat/2)**2 + np.cos(np.radians(lat1))*np.cos(np.radians(lat2))*np.sin(dlon/2)**2
     c = 2*np.arctan2(np.sqrt(a),np.sqrt(1-a))
 
-    distance_km = R*c
+    dist = R*c
 
-    st.metric("Distance (KM)", f"{distance_km:.2f} km")
+    st.metric("Distance KM", f"{dist:.2f}")
 
-    if distance_km > 1500:
-        st.error("🚨 Impossible Travel Detected")
-    elif distance_km > 500:
-        st.warning("⚠️ Suspicious Travel")
-    else:
-        st.success("✅ Normal Travel")
-
-    st.map(pd.DataFrame({'lat':[lat1,lat2],'lon':[lon1,lon2]}))
-
-# ================= TAB 4 =================
+# ---------------- TAB 4 ----------------
 with tab4:
+    st.write("AI insights based on features")
 
-    st.markdown("### 🧠 AI Insights")
+# ---------------- TAB 5 ----------------
+with tab5:
 
-    try:
-        imp = pd.DataFrame({
-            "Feature": columns,
-            "Importance": model.feature_importances_
-        }).sort_values(by="Importance", ascending=False).head(10)
+    st.markdown("### 📜 Transaction History")
 
-        st.bar_chart(imp.set_index("Feature"))
-    except:
-        st.write("No feature importance available")
+    hist = get_history(st.session_state.user)
+
+    if hist:
+        df = pd.DataFrame(hist, columns=["User","Amount","Method","Result","Probability"])
+        st.dataframe(df)
+    else:
+        st.write("No history yet")
